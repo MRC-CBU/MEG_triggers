@@ -1,8 +1,7 @@
 import numpy as np
 import mne
-import re
 from collections import namedtuple
-from meg_utils.trigger_misc import decode_sti_value_full_info
+from .trigger_misc import decode_sti_value_full_info
 
 #===============================================================================
 def decompose_sti101_in_individual_channels(raw_file=None, data=None, times=None, raw=None, verbose=True):
@@ -237,7 +236,7 @@ def clean_sti101_timeseries(data101, sti_channels, min_samples=2, max_button_sam
     return filtered_time_series, removed_events
 
 #===============================================================================
-def sum_stim_channels_and_find_events(cleaned_time_series, individual_channels, raw, stim_range=(1, 9), min_duration=0.002, shortest_event=1, consecutive=True):
+def sum_stim_channels_and_find_events(cleaned_time_series, individual_channels, raw, stim_range=(1, 9), min_duration=0.002, shortest_event=1, consecutive=True, verbose=True):
   """
   Sum stimulus channels and detect events from cleaned time series data.
 
@@ -256,6 +255,13 @@ def sum_stim_channels_and_find_events(cleaned_time_series, individual_channels, 
     Range of STI channel numbers to consider as stimulus channels (default: (1, 9)).
   min_duration : float, optional
     Minimum duration (in seconds) for an event to be considered valid (default: 0.002).
+  shortest_event : int, optional
+    Minimum number of samples for an event to be considered valid (default: 1).
+  consecutive : bool, optional
+    If True, only considers consecutive events as valid (default: True).
+  verbose : bool, optional
+    If True, prints verbose output (default: True).
+  
 
   Returns:
   --------
@@ -267,6 +273,8 @@ def sum_stim_channels_and_find_events(cleaned_time_series, individual_channels, 
   
   # Define stimulus channels (STI001 - STI008)
   stimulus_channels = [f'STI{str(i).zfill(3)}' for i in range(*stim_range)]
+  if verbose:
+    print(f"Stimulus channels considered for summing: {stimulus_channels}")
 
   # Get indices of stimulus channels that exist in `individual_channels`
   stimulus_indices = np.array([i for i, ch in enumerate(individual_channels) if ch in stimulus_channels])
@@ -389,120 +397,7 @@ def translate_channels_to_events(time_series_array, channel_names):
     return event_time_series, event_names
 
 #===============================================================================
-def clean_event_timeseries(event_time_series, event_names, min_event_duration=0.002, max_event_duration=0.3, button_max_duration=20.0, sampling_rate=1000, verbose=True):
-    """
-    Cleans event time series data by applying several filtering steps:
-
-    1. Removes events that are shorter than `min_event_duration` or longer than `max_event_duration`.
-    2. Removes `Event_4` if it occurs simultaneously with `btnR_3` or `btnR_4`.
-    3. Removes all events if `btnR_4` is continuously active for longer than `button_max_duration`.
-
-    Parameters:
-    -----------
-    event_time_series : numpy.ndarray
-      Array containing the time series for each event.
-    event_names : list of str
-      List of event names corresponding to the columns in `event_time_series`.
-    min_event_duration : float, optional
-      Minimum duration (in seconds) for an event to be considered valid. Default is 0.002.
-    max_event_duration : float, optional
-      Maximum duration (in seconds) for an event to be considered valid. Default is 0.3.
-    button_max_duration : float, optional
-      Maximum duration (in seconds) for `btnR_4` to be active before considering it an artifact. Default is 20.0.
-    sampling_rate : int, optional
-      Sampling rate of the data (in Hz). Default is 1000.
-    verbose : bool, optional
-      If True, prints details about removed events. Default is True.
-
-    Returns:
-    --------
-    filtered_time_series : numpy.ndarray
-      The cleaned event time series.
-    removed_events : list of tuples
-      List of removed event locations (timepoint, channel index).
-    """
-
-    max_event_timepoints = int(max_event_duration * sampling_rate)  # Convert max event duration to samples
-    min_event_timepoints = max(1, int(min_event_duration * sampling_rate))  # Convert min event duration to samples
-    max_button_timepoints = int(button_max_duration * sampling_rate)  # Convert max button press duration to samples
-
-    # Create a copy of the original time series to modify
-    filtered_time_series = event_time_series.copy()
-    removed_events = []  # List to store removed event locations
-
-    # Create a binary version for event detection (preserves original values)
-    binary_time_series = (event_time_series != 0).astype(int)
-
-    # Identify channel indices
-    event_channel_indices = {name: i for i, name in enumerate(event_names)}
-
-    event_4_idx = event_channel_indices.get("Event_4")
-    btnR_3_idx = event_channel_indices.get("btnR_3")
-    btnR_4_idx = event_channel_indices.get("btnR_4")
-    event_indices = [i for name, i in event_channel_indices.items() if name.startswith("Event")]
-
-    # Step 1: Remove events that are too short or too long
-    for i in range(filtered_time_series.shape[1]):  
-        event_changes = np.diff(np.concatenate(([0], binary_time_series[:, i], [0])))  # Use binary version for event detection
-
-        event_starts = np.where(event_changes == 1)[0]  # Indices where events start
-        event_ends = np.where(event_changes == -1)[0]   # Indices where events end
-
-        for start, end in zip(event_starts, event_ends):
-            duration = end - start  # Calculate event duration in timepoints
-            
-            # Remove short events
-            if duration < min_event_timepoints:
-                filtered_time_series[start:end, i] = 0  
-                removed_events.append((start, i))  
-                if verbose:
-                    print(f"Removed short {event_names[i]} at timepoints {start} to {end}.")
-
-            # # Remove long events
-            # if event_names[i].startswith("Event") and duration > max_event_timepoints:
-            #     filtered_time_series[start:end, i] = 0  
-            #     removed_events.append((start, i))  
-            #     if verbose:
-            #         print(f"Removed long {event_names[i]} at timepoints {start} to {end}.")
-
-    # Step 2: Remove **Event_4** if it started while **btnR_3 or btnR_4** was active
-    if event_4_idx is not None and (btnR_3_idx is not None or btnR_4_idx is not None):
-        event_4_changes = np.diff(np.concatenate(([0], binary_time_series[:, event_4_idx], [0])))  # Detect `Event_4` onsets
-        event_4_starts = np.where(event_4_changes == 1)[0]  # Start indices of `Event_4`
-        event_4_ends = np.where(event_4_changes == -1)[0]   # End indices of `Event_4`
-
-        for start, end in zip(event_4_starts, event_4_ends):
-            # Check if btnR_3 OR btnR_4 was active at the onset
-            if (btnR_3_idx is not None and binary_time_series[start, btnR_3_idx] == 1) or \
-               (btnR_4_idx is not None and binary_time_series[start, btnR_4_idx] == 1):
-                filtered_time_series[start:end, event_4_idx] = 0  # Remove entire duration of `Event_4`
-                removed_events.append((start, event_4_idx))  
-                if verbose:
-                    print(f"Removed full Event_4 from {start} to {end} because btnR_3 or btnR_4 was active.")
-
-    # Step 3: Remove **all events** if **btnR_4** was pressed continuously for more than **X seconds**
-    if btnR_4_idx is not None:
-        btnR_4_changes = np.diff(np.concatenate(([0], binary_time_series[:, btnR_4_idx], [0])))  # Detect button press on/off
-        btnR_4_starts = np.where(btnR_4_changes == 1)[0]  # Start indices of `btnR_4`
-        btnR_4_ends = np.where(btnR_4_changes == -1)[0]   # End indices of `btnR_4`
-
-        for start, end in zip(btnR_4_starts, btnR_4_ends):
-            button_duration = end - start  # Duration of the button press
-            
-            if button_duration > max_button_timepoints:  # Check if `btnR_4` press is too long
-                for j in event_indices:  # Remove all events occurring during this time
-                    filtered_time_series[start:end, j] = 0  
-                    removed_events.append((start, j))  
-                
-                if verbose:
-                    print(f"Removed ALL events from {start} to {end} because btnR_4 was pressed for over {button_max_duration}s.")
-
-    return filtered_time_series, removed_events
-
-#===============================================================================
 def create_event_onsets(time_series_array, series_names, raw, verbose=True):
-  
-    
     info = mne.create_info(series_names, raw.info['sfreq'], 'stim')
 
     raw_temp = mne.io.RawArray(time_series_array, info, first_samp=raw.first_samp, verbose="WARNING")
