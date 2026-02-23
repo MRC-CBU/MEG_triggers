@@ -6,7 +6,7 @@
 
 ---
 
-💡 The functions in this package were developed specifically for **Neuromag Vectorview and MEGIN Neo MEG systems** at the MRC Cognition and Brain Sciences Unit (CBU). This is **not a polished, general-purpose package**: it grew out of practical work on two legacy datasets acquired at the CBU.
+> 💡 The functions in this package were developed specifically for **Neuromag Vectorview and MEGIN Neo MEG systems** at the MRC Cognition and Brain Sciences Unit (CBU). This is **not a polished, general-purpose package**: it grew out of practical work on two legacy datasets acquired at the CBU.
 
 ## Background
 

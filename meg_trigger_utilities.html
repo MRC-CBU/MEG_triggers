@@ -7531,19 +7531,45 @@ a.anchor-link {
 </div>
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<h1 id="Utility-functions-for-extracting,-inspecting,-and-cleaning-MEG-trigger-events">Utility functions for extracting, inspecting, and cleaning MEG trigger events<a class="anchor-link" href="#Utility-functions-for-extracting,-inspecting,-and-cleaning-MEG-trigger-events">¶</a></h1><p>In most MEG experiments, the stimulus delivery program (e.g. PsychoPy, Presentation, E-Prime) sends event triggers to the MEG system, which are recorded on one or more trigger channels. These triggers are the backbone of epoching and condition labelling: they tell us what happened when.</p>
-<p>Depending on the acquisition setup, triggers may be saved either as multiple separate “bit” channels (each representing one digital line) or as a single summed channel (often called STI101 or similar), which encodes the state of all bits into one integer value.</p>
-<p>In practice, however, trigger recordings are often messy. You may encounter spurious pulses, overlapping triggers (e.g. stimulus and keypress at the same time), or incomplete recordings where only a summed trigger channel was saved instead of the individual bit channels. These issues can lead to missing events, extra non-existent events, or mislabelled trials if not handled carefully.</p>
-<p>The package <code>meg_event_utils</code> provides a collection of helper functions to extract, inspect and clean MEG trigger events, with a focus on making these problems easier to diagnose and fix.</p>
-<p>Libraries such as MNE-Python already provide excellent tools for reading and extracting events from trigger channels in standard cases. However, in real-world datasets with spurious triggers, overlapping codes, or incomplete trigger recordings, additional inspection and custom handling are often needed. The functions in <code>meg_event_utils</code> are designed to complement existing workflows by making these edge cases easier to diagnose and fix.</p>
-<p>💡 Note, this is not a polished, general-purpose package. It grew out of practical work on two legacy datasets acquired at the MRC Cognition and Brain Sciences Unit. Still, the basic inspection and quality-control steps it provides should be relevant for most MEG datasets.</p>
+<h1 id="Utility-functions-for-extracting,-inspecting,-and-cleaning-MEG-trigger-events-on-Neuromag-Vectorview-and-MEGIN-Neo-MEG-systems">Utility functions for extracting, inspecting, and cleaning MEG trigger events on Neuromag Vectorview and MEGIN Neo MEG systems<a class="anchor-link" href="#Utility-functions-for-extracting,-inspecting,-and-cleaning-MEG-trigger-events-on-Neuromag-Vectorview-and-MEGIN-Neo-MEG-systems">¶</a></h1><blockquote>
+<p>💡 The functions in this package were developed specifically for <strong>Neuromag Vectorview and MEGIN Neo MEG systems</strong> at the MRC Cognition and Brain Sciences Unit (CBU). This is <strong>not a polished, general-purpose package</strong>: it grew out of practical work on two legacy datasets acquired at the CBU.</p>
+</blockquote>
+<blockquote>
 <p>💡 This tutorial focuses on the main functionality of <code>meg_event_utils</code> rather than covering every available function. Each function in the package is documented in its docstring, and curious users are encouraged to explore the code and documentation on their own.</p>
+</blockquote>
+<h2 id="Background">Background<a class="anchor-link" href="#Background">¶</a></h2><p>In most MEG experiments, the stimulus delivery program (e.g. PsychoPy, Presentation, E-Prime) sends event triggers to the MEG system, which are recorded on one or more trigger channels. These triggers are the backbone of epoching and condition labelling: they tell us what happened when.</p>
+<p>Depending on the MEG system, triggers may be saved as multiple separate "bit" channels (each representing one digital line) and/or as a single summed channel, which encodes the binary state of all bit channels as an integer. For example, in the Neuromag Vectorview and MEGIN Neo MEG systems, there are 16 bit channels labelled <strong>STI001</strong> to <strong>STI016</strong>, and a summed channel labelled <strong>STI101</strong>. The value at each sample in STI101 is the weighted sum of the bit channels (STI001 × 1, STI002 × 2, STI003 × 4, etc.). Typically, the first 8 bit channels are used to encode <strong>stimulus events</strong> (allowing unique codes from 1 to 255 in STI101), while the remaining 8 channels are used to encode <strong>button presses</strong>. This can lead to values in STI101 ranging from 512 up to 65,535 for responses, including unique codes for simultaneous stimulus–response events and for multiple simultaneous button presses.</p>
+<p>In practice, however, trigger recordings are often messy. You may encounter spurious pulses, overlapping triggers (e.g. stimulus and keypress at the same time), or incomplete recordings where only a summed trigger channel was saved instead of the individual bit channels. These issues can lead to missing events, extra non-existent events, or mislabelled trials if not handled carefully.</p>
+<p>Libraries such as MNE-Python already provide excellent tools for reading and extracting events from trigger channels in standard cases. However, in real-world datasets with spurious triggers or overlapping codes, additional inspection and custom handling are often needed. The functions in <code>meg_event_utils</code> are designed to complement existing workflows by making these edge cases easier to diagnose and fix.</p>
 <p>Below, I describe a typical workflow for inspecting and extracting events, followed by the typical problems and their solutions.</p>
 </div>
 </div>
 </div>
 </div>
-<div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=3c199064">
+<div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=29defaae">
+<div class="jp-Cell-inputWrapper" tabindex="0">
+<div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
+</div>
+<div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
+</div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
+<h2 id="Typical-problems-with-event-triggers-and-their-solutions-using-meg_event_utils">Typical problems with event triggers and their solutions using <code>meg_event_utils</code><a class="anchor-link" href="#Typical-problems-with-event-triggers-and-their-solutions-using-meg_event_utils">¶</a></h2><h3 id="Problem:-Only-a-summed-STI101-channel-is-saved,-but-no-separate-bit-channels">Problem: Only a summed STI101 channel is saved, but no separate bit channels<a class="anchor-link" href="#Problem:-Only-a-summed-STI101-channel-is-saved,-but-no-separate-bit-channels">¶</a></h3><p>When only the summed trigger channel is available, you lose direct access to the individual bit lines. This makes it harder to see which specific triggers were active at a given time and can complicate debugging, quality control, and recovery of the original event codes, especially when triggers overlap or one or more bit channels has spurious pulses (e.g., a loose connection).</p>
+<p><strong>Solution</strong></p>
+<p>The summed STI101 channel is decomposed into individual channels. This means that even if the original individual channels were not saved, they can be reconstructed from STI101 and inspected separately.</p>
+<h3 id="Problem:-Overlapping-stimulus-and-button-press-triggers">Problem: Overlapping stimulus and button-press triggers<a class="anchor-link" href="#Problem:-Overlapping-stimulus-and-button-press-triggers">¶</a></h3><p>When stimulus and button-press triggers occur at the same time, their bit patterns are combined in the summed channel. This can create unexpected event codes, leading to mislabelled trials or extra conditions unless the overlap is explicitly detected and handled.</p>
+<p><strong>Solution</strong></p>
+<p>As above, the STI101 channel is first decomposed into individual channels. Then only the stimulus channels (typically STI001 to STI008) are summed, while button-press channels are kept separate (i.e., not included in the sum). This way, overlapping stimulus and button-press triggers do not create new, unwanted event codes.</p>
+<h3 id="Problem:-Spurious-triggers,-creating-non-existent-stimulus-events">Problem: Spurious triggers, creating non-existent stimulus events<a class="anchor-link" href="#Problem:-Spurious-triggers,-creating-non-existent-stimulus-events">¶</a></h3><p>Spurious pulses on trigger lines can generate events that never actually occurred in the experiment. If not identified, these false events inflate event counts, shift trial timing, and can contaminate downstream analyses.</p>
+<p><strong>Solution</strong></p>
+<p>In the two legacy datasets I worked with, the spurious triggers typically occurred on the <strong>STI003</strong> channel, and they always happened while a button (STI013, STI015, or STI016) was being pressed (although not every button press produced a spurious STI003 pulse). The practical solution in this case was to remove STI003 triggers that start while STI013, STI015, or STI016 is ON.</p>
+<p>In some cases, spurious triggers also appeared when a button was pressed for a very long time. For those situations, the solution was to remove all events occurring during prolonged button presses.</p>
+<h3 id="Problem:-Are-my-event-triggers-as-I-expect-them-to-be?">Problem: Are my event triggers as I expect them to be?<a class="anchor-link" href="#Problem:-Are-my-event-triggers-as-I-expect-them-to-be?">¶</a></h3><p>Even when triggers can be extracted without obvious errors, it is often unclear whether they truly reflect the intended experimental design. Unexpected counts, missing conditions, or suspicious timing patterns can easily go unnoticed and propagate into later analyses.</p>
+<p><strong>Solution</strong></p>
+<p>Create summary reports and diagnostic plots of the trigger channels and extracted events. These allow you to quickly check event counts, inspect the timing and co-occurrence of trigger lines, and spot suspicious patterns before committing to epoching and statistical analysis.</p>
+</div>
+</div>
+</div>
+</div>
+<div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=42a32786">
 <div class="jp-Cell-inputWrapper" tabindex="0">
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
@@ -7556,16 +7582,16 @@ a.anchor-link {
 <h3 id="Option-2:-Install-in-editable-mode">Option 2: Install in editable mode<a class="anchor-link" href="#Option-2:-Install-in-editable-mode">¶</a></h3><p>From a terminal:</p>
 <div class="highlight"><pre><span></span>pip<span class="w"> </span>install<span class="w"> </span>-e<span class="w"> </span>/path/to/meg_event_utils
 </pre></div>
-<p>After either of these, you can import the package as usual:</p>
+<h3 id="After-either-of-these,-you-can-import-the-package-as-usual:">After either of these, you can import the package as usual:<a class="anchor-link" href="#After-either-of-these,-you-can-import-the-package-as-usual:">¶</a></h3>
 </div>
 </div>
 </div>
-</div><div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs" id="cell-id=42fd2637">
+</div><div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs" id="cell-id=750a578c">
 <div class="jp-Cell-inputWrapper" tabindex="0">
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
 <div class="jp-InputArea jp-Cell-inputArea">
-<div class="jp-InputPrompt jp-InputArea-prompt">In [1]:</div>
+<div class="jp-InputPrompt jp-InputArea-prompt">In [ ]:</div>
 <div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
 <div class="cm-editor cm-s-jupyter">
 <div class="highlight hl-ipython3"><pre><span></span><span class="kn">import</span> <span class="nn">meg_event_utils</span> <span class="k">as</span> <span class="nn">meu</span>
@@ -7576,36 +7602,15 @@ a.anchor-link {
 </div>
 </div>
 </div>
-<div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=29defaae">
-<div class="jp-Cell-inputWrapper" tabindex="0">
-<div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
-</div>
-<div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
-</div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<h2 id="Typical-problems-with-event-triggers-and-their-solutions-using-meg_event_utils">Typical problems with event triggers and their solutions using <code>meg_event_utils</code><a class="anchor-link" href="#Typical-problems-with-event-triggers-and-their-solutions-using-meg_event_utils">¶</a></h2><h3 id="Problem:-Only-the-summed-STI101-saved,-but-no-separate-(or-not-all-separate)-channels">Problem: Only the summed STI101 saved, but no separate (or not all separate) channels<a class="anchor-link" href="#Problem:-Only-the-summed-STI101-saved,-but-no-separate-(or-not-all-separate)-channels">¶</a></h3><p>When only the summed trigger channel is available, you lose direct access to the individual bit lines. This makes it harder to see which specific triggers were active at a given time and can complicate debugging, quality control, and recovery of the original event codes, especially when triggers overlap or behave unexpectedly.</p>
-<p><strong>Solution</strong></p>
-<p>The summed STI101 channel is decomposed into individual channels. This means that even if the original individual channels were not saved, they can be reconstructed from STI101 and inspected separately.</p>
-<h3 id="Problem:-Overlapping-keypress-and-stimulus-triggers">Problem: Overlapping keypress and stimulus triggers<a class="anchor-link" href="#Problem:-Overlapping-keypress-and-stimulus-triggers">¶</a></h3><p>When stimulus and button-press triggers occur at the same time, their bit patterns are combined in the summed channel. This can create ambiguous or incorrect event codes, leading to mislabelled trials or extra conditions unless the overlap is explicitly detected and handled.</p>
-<p><strong>Solution</strong></p>
-<p>As above, the STI101 channel is first decomposed into individual channels. Then only the stimulus channels (typically STI001 to STI008) are summed, while button-press channels are kept separate (i.e., not included in the sum). This way, overlapping stimulus and button-press triggers do not create new, unwanted event codes.</p>
-<h3 id="Problem:-Spurious-triggers,-creating-non-existent-stimulus-events">Problem: Spurious triggers, creating non-existent stimulus events<a class="anchor-link" href="#Problem:-Spurious-triggers,-creating-non-existent-stimulus-events">¶</a></h3><p>Spurious pulses on trigger lines can generate events that never actually occurred in the experiment. If not identified, these false events inflate event counts, shift trial timing, and can contaminate downstream analyses.</p>
-<p><strong>Solution</strong></p>
-<p>In the two legacy datasets I worked with, the spurious triggers typically occurred on the STI003 channel, and they always happened while a button (STI013, STI015, or STI016) was being pressed (although not every button press produced a spurious STI003 pulse). The practical solution in this case was to remove STI003 triggers that start while STI013, STI015, or STI016 is ON.</p>
-<p>In some cases, spurious triggers also appeared when a button was pressed for a very long time. For those situations, the solution was to remove all events occurring during prolonged button presses.</p>
-<h3 id="Problem:-Are-my-event-triggers-as-I-expect-them-to-be?">Problem: Are my event triggers as I expect them to be?<a class="anchor-link" href="#Problem:-Are-my-event-triggers-as-I-expect-them-to-be?">¶</a></h3><p>Even when triggers can be extracted without obvious errors, it is often unclear whether they truly reflect the intended experimental design. Unexpected counts, missing conditions, or suspicious timing patterns can easily go unnoticed and propagate into later analyses.</p>
-<p><strong>Solution</strong></p>
-<p>Create summary reports and diagnostic plots of the trigger channels and extracted events. These allow you to quickly check event counts, inspect the timing and co-occurrence of trigger lines, and spot suspicious patterns before committing to epoching and statistical analysis.</p>
-</div>
-</div>
-</div>
-</div>
 <div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=fdd369b0">
 <div class="jp-Cell-inputWrapper" tabindex="0">
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<h2 id="Example:-Inspect-the-event-counts-for-a-couple-of-subjects">Example: Inspect the event counts for a couple of subjects<a class="anchor-link" href="#Example:-Inspect-the-event-counts-for-a-couple-of-subjects">¶</a></h2>
+<h2 id="Example:-Inspect-the-event-counts-for-a-couple-of-subjects">Example: Inspect the event counts for a couple of subjects<a class="anchor-link" href="#Example:-Inspect-the-event-counts-for-a-couple-of-subjects">¶</a></h2><blockquote>
+<p>💡 This example is written for Neuromag Vectorview and MEGIN Neo MEG systems, which produce raw data files in FIF format</p>
+</blockquote>
 </div>
 </div>
 </div>
@@ -7635,12 +7640,15 @@ a.anchor-link {
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
 <p>The code below performs the following steps for each file:</p>
 <ol>
-<li><code>meu.trigger_misc.get_used_sti_channels</code>.<br/>
-Checks whether the .fif file contains any STI channels at all.</li>
-<li><code>meu.trigger_cleaning.decompose_sti101_in_individual_channels</code>.<br/>
-Decomposes the summed STI101 channel into individual bit channels. Even if individual channels are present in the file, this function uses the STI101 channel, which is typically always saved.</li>
-<li><code>meu.trigger_cleaning.sum_stim_channels_and_find_events</code>.
-Sums the stimulus channels (by default STI001 to STI008; higher channels are usually button presses) and extracts events and their counts. The main options are:<ul>
+<li><p><code>meu.trigger_misc.get_used_sti_channels</code>.<br/>
+Checks whether the raw data file contains any trigger (STI) channels at all.</p>
+</li>
+<li><p><code>meu.trigger_cleaning.decompose_sti101_in_individual_channels</code>.<br/>
+Decomposes the summed STI101 channel into individual bit channels. Even if individual channels are present in the file, this function uses only the STI101 channel, which is typically always saved.</p>
+</li>
+<li><p><code>meu.trigger_cleaning.sum_stim_channels_and_find_events</code>.
+Sums the stimulus channels (by default STI001 to STI008; higher channels are usually button presses) and extracts events and their counts. The main options are:</p>
+<ul>
 <li><code>stim_range</code> : <em>tuple</em>. Range of STI channel numbers to consider as stimulus, instead of button press, channels (default: <code>(1, 9)</code>).</li>
 <li><code>min_duration</code> : <em>float</em>. Minimum duration (in seconds) for an event to be considered valid (default: <code>0.002</code>).</li>
 <li><code>shortest_event</code> : <em>int</em>. Minimum number of samples for an event to be considered valid (default: <code>1</code>).</li>
@@ -7648,10 +7656,12 @@ Sums the stimulus channels (by default STI001 to STI008; higher channels are usu
 <li><code>verbose</code> : <em>bool</em>. If True, prints verbose output (default: <code>True</code>).</li>
 </ul>
 </li>
-<li><code>meu.trigger_reporting.print_event_counts_table</code>.<br/>
-Prints a simple event count table, with event codes in the top row and their number of occurrences in the bottom row.</li>
-<li><code>meu.trigger_plotting.create_basic_plot</code>.<br/>
-Plots the time courses of the individual STI channels (as decomposed from STI101). Each channel is shown as a binary (0/1) time series indicating whether it is OFF or ON at a given time point.</li>
+<li><p><code>meu.trigger_reporting.print_event_counts_table</code>.<br/>
+Prints a simple event count table, with event codes in the top row and their number of occurrences in the bottom row.</p>
+</li>
+<li><p><code>meu.trigger_plotting.create_basic_plot</code>.<br/>
+Plots the time courses of the individual bit channels (as decomposed from the summed STI101). Each channel is shown as a binary (0/1) time series indicating whether it is OFF or ON at a given time point.</p>
+</li>
 </ol>
 </div>
 </div>
@@ -7661,7 +7671,7 @@ Plots the time courses of the individual STI channels (as decomposed from STI101
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
 <div class="jp-InputArea jp-Cell-inputArea">
-<div class="jp-InputPrompt jp-InputArea-prompt">In [3]:</div>
+<div class="jp-InputPrompt jp-InputArea-prompt">In [ ]:</div>
 <div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
 <div class="cm-editor cm-s-jupyter">
 <div class="highlight hl-ipython3"><pre><span></span><span class="k">for</span> <span class="n">raw_file</span> <span class="ow">in</span> <span class="n">raw_files</span><span class="p">:</span>
@@ -7864,11 +7874,13 @@ Removed short STI003 event at timepoints 282539 to 282540.
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
 <div class="jp-InputArea jp-Cell-inputArea">
-<div class="jp-InputPrompt jp-InputArea-prompt">In [7]:</div>
+<div class="jp-InputPrompt jp-InputArea-prompt">In [ ]:</div>
 <div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
 <div class="cm-editor cm-s-jupyter">
 <div class="highlight hl-ipython3"><pre><span></span><span class="n">events</span><span class="p">,</span> <span class="n">event_counts</span> <span class="o">=</span> <span class="n">meu</span><span class="o">.</span><span class="n">trigger_cleaning</span><span class="o">.</span><span class="n">sum_stim_channels_and_find_events</span><span class="p">(</span><span class="n">cleaned_time_series</span><span class="p">,</span> <span class="n">individual_channels</span><span class="p">,</span> <span class="n">raw</span><span class="p">)</span>
+
 <span class="n">meu</span><span class="o">.</span><span class="n">trigger_reporting</span><span class="o">.</span><span class="n">print_event_counts_table</span><span class="p">(</span><span class="n">event_counts</span><span class="p">)</span>
+
 <span class="n">plt</span><span class="o">.</span><span class="n">figure</span><span class="p">(</span><span class="n">figsize</span><span class="o">=</span><span class="p">(</span><span class="mi">20</span><span class="p">,</span> <span class="mi">3</span><span class="p">))</span>
 <span class="n">plt</span> <span class="o">=</span> <span class="n">meu</span><span class="o">.</span><span class="n">trigger_plotting</span><span class="o">.</span><span class="n">create_basic_plot</span><span class="p">(</span><span class="n">cleaned_time_series</span><span class="p">,</span> <span class="n">raw</span><span class="o">.</span><span class="n">times</span><span class="p">,</span> <span class="n">individual_channels</span><span class="p">,</span> <span class="n">title</span><span class="o">=</span><span class="s2">"STI Channels Time Course"</span><span class="p">)</span>
 <span class="n">plt</span><span class="o">.</span><span class="n">show</span><span class="p">()</span>
@@ -8061,10 +8073,10 @@ Event Counts:
 /megdata/cbu/dgw_studies/meg09_0355/091208/run_01_raw.fif
 </pre></div>
 <p>The script generates a per-subject report (event counts + trigger plot), and then combines all subjects into a single HTML report for convenient inspection.</p>
-<p>The script supports two modes:</p>
+<p>The example script supports two modes of reporting:</p>
 <ul>
 <li><p>Not cleaned (<code>REPORT_CLEANED = False</code>): Decompose STI101 → sum only stimulus channels → count events → plot decomposed trigger lines.<br/>
-This is often sufficient and is a good first pass.</p>
+<strong>This is often sufficient and is a good first pass.</strong></p>
 </li>
 <li><p>Cleaned (<code>REPORT_CLEANED = True</code>): Additionally applies trigger cleaning and plots what was removed.<br/>
 This is useful if you already know the dataset has systematic artefacts.</p>
@@ -8078,7 +8090,7 @@ This is useful if you already know the dataset has systematic artefacts.</p>
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
 <div class="jp-InputArea jp-Cell-inputArea">
-<div class="jp-InputPrompt jp-InputArea-prompt">In [11]:</div>
+<div class="jp-InputPrompt jp-InputArea-prompt">In [ ]:</div>
 <div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
 <div class="cm-editor cm-s-jupyter">
 <div class="highlight hl-ipython3"><pre><span></span><span class="kn">import</span> <span class="nn">glob</span>
