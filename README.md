@@ -17,8 +17,8 @@ Depending on the MEG system, triggers may be saved as multiple separate "bit" ch
 In practice, however, trigger recordings are often messy. Common problems include:
 
 - **Only the summed channel was saved**, with no individual bit channels
-- **Overlapping triggers** — stimulus and keypress occurring simultaneously, creating unexpected combined event codes
-- **Spurious pulses** — false triggers that inflate event counts and contaminate analyses
+- **Overlapping triggers** - stimulus and keypress occurring simultaneously, creating unexpected combined event codes
+- **Spurious pulses** - false triggers that inflate event counts and contaminate analyses
 
 Libraries such as MNE-Python already provide excellent tools for reading and extracting events from trigger channels in standard cases. However, in real-world datasets with spurious triggers or overlapping codes, additional inspection and custom handling are often needed. The functions in `meg_event_utils` are designed to complement existing workflows by making these edge cases easier to diagnose and fix.
 
@@ -34,6 +34,8 @@ meg_event_utils/             # Python package
     trigger_plotting.py      # Plot STI channel time courses, etc.
     trigger_reporting.py     # Generate HTML reports, etc.
 meg_trigger_utilities.ipynb  # Tutorial notebook demonstrating the usage
+meg_trigger_utilities.html   # Tutorial notebook in HTML format
+meg_trigger_utilities.pdf    # Tutorial notebook on PDF format
 reports/                     # Example HTML reports generated in the tutorial
 ```
 
