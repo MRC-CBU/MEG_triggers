@@ -8046,7 +8046,7 @@ Event Counts:
 </div>
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<h2 id="Inspect-the-event-triggers-for-your-whole-dataset">Inspect the event triggers for your whole dataset<a class="anchor-link" href="#Inspect-the-event-triggers-for-your-whole-dataset">¶</a></h2><p>It can be useful to inspect event triggers across your whole dataset (or a subset of it) to quickly spot subjects with unusual event counts, spurious trigger activity, or missing trigger lines. Below is an example script that inspects triggers for <code>run_01</code> in the <code>dgw_studies</code> dataset:</p>
+<h2 id="Inspect-the-event-triggers-for-your-whole-dataset">Inspect the event triggers for your whole dataset<a class="anchor-link" href="#Inspect-the-event-triggers-for-your-whole-dataset">¶</a></h2><p>It can be useful to inspect event triggers across your whole dataset (or a subset of it) to quickly spot subjects with unexpected event counts or spurious trigger activity. Below is an example script that inspects triggers for <code>run_01</code> in the <code>dgw_studies</code> dataset:</p>
 <div class="highlight"><pre><span></span>ls<span class="w"> </span>/megdata/cbu/dgw_studies/meg09_*/*/run_01_raw.fif
 
 /megdata/cbu/dgw_studies/meg09_0089/090407/run_01_raw.fif
@@ -8072,7 +8072,7 @@ Event Counts:
 /megdata/cbu/dgw_studies/meg09_0337/091127/run_01_raw.fif
 /megdata/cbu/dgw_studies/meg09_0355/091208/run_01_raw.fif
 </pre></div>
-<p>The script generates a per-subject report (event counts + trigger plot), and then combines all subjects into a single HTML report for convenient inspection.</p>
+<p>The script below generates a per-subject report (event counts + trigger plot), and then combines all subjects into a single HTML report for convenient inspection.</p>
 <p>The example script supports two modes of reporting:</p>
 <ul>
 <li><p>Not cleaned (<code>REPORT_CLEANED = False</code>): Decompose STI101 → sum only stimulus channels → count events → plot decomposed trigger lines.<br/>
