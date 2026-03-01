@@ -397,29 +397,6 @@ def translate_channels_to_events(time_series_array, channel_names):
     return event_time_series, event_names
 
 #===============================================================================
-def create_event_onsets(time_series_array, series_names, raw, verbose=True):
-    info = mne.create_info(series_names, raw.info['sfreq'], 'stim')
-
-    raw_temp = mne.io.RawArray(time_series_array, info, first_samp=raw.first_samp, verbose="WARNING")
-    
-    events = mne.find_events(
-      raw_temp, 
-      stim_channel=series_names, 
-      consecutive='increasing', 
-      #min_duration=0.002,
-      uint_cast=True, 
-      verbose='WARNING')  
-
-    event_counts = mne.count_events(events, ids=None)
-
-    if verbose:
-      print("\nEvent Counts")
-      for event, count in event_counts.items():
-        print(f"    Event {event}: {count} occurrences")  
-
-    return events, event_counts
-  
-#===============================================================================
 def find_corrected_events(raw_file=None, raw=None, cleaning_steps=["remove_long_press", "remove_sti003", "remove_short_events", "remove_isolated_events"], min_duration=0, shortest_event=1, consecutive=True, verbose=True):
   """
   Find corrected events from raw MEG data file.
