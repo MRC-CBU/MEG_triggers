@@ -1,5 +1,6 @@
 import numpy as np
 import mne
+import pandas as pd
 
 #===============================================================================
 def get_original_events(raw_file, consecutive='increasing', verbose=True):
@@ -460,5 +461,85 @@ def get_channel_timecourses(raw_file):
   print(f"Final channel labels: {channel_lables}")
   
   return data, times, channel_lables
+
+#===============================================================================
+def events_to_bids_tsv(events, raw=None, sfreq=None, first_samp=0, event_id=None, output_file=None, duration=0, verbose=True):
+  """
+  Convert an events array to a BIDS-style events TSV file.
+
+  Parameters:
+  -----------
+  events : numpy.ndarray
+    Events array of shape (n_events, 3): [sample, previous_value, event_id].
+  raw : mne.io.Raw, optional
+    Raw MEG object used to extract sfreq and first_samp. Takes priority over sfreq/first_samp.
+  sfreq : float, optional
+    Sampling frequency in Hz. Used only if raw is not provided.
+  first_samp : int, optional
+    Index of the first sample. Used only if raw is not provided. Default is 0.
+  event_id : dict, optional
+    Dictionary mapping trial type labels (str) to event IDs (int),
+    e.g. {'face': 1, 'house': 2}. If provided, adds a 'trial_type' column.
+  output_file : str, optional
+    Path to save the TSV file (e.g. 'sub-01_task-myexp_events.tsv').
+    If None, the DataFrame is returned without saving.
+  duration : float or dict, optional
+    Duration of each event in seconds. If a float, applies to all events.
+    If a dict, maps event IDs to durations. Default is 0.
+  verbose : bool, optional
+    If True, prints the first rows of the resulting DataFrame. Default is True.
+
+  Returns:
+  --------
+  df : pandas.DataFrame
+    DataFrame with BIDS events columns: onset, duration, value [, trial_type].
+
+  Example:
+  --------
+  >>> df = events_to_bids_tsv(events, raw=raw, event_id={'face': 1, 'house': 2}, output_file='sub-01_task-exp_events.tsv')
+       onset  duration  value trial_type
+       0.312     0.0      1      face
+       0.624     0.0      2     house
+  """
+  if raw is not None:
+    sfreq = raw.info['sfreq']
+    first_samp = raw.first_samp
+  elif sfreq is None:
+    raise ValueError("Either 'raw' or 'sfreq' must be provided.")
+
+  # Compute onsets in seconds relative to recording start
+  onsets = (events[:, 0] - first_samp) / sfreq
+  event_values = events[:, 2]
+
+  # Compute durations
+  if isinstance(duration, dict):
+    durations = np.array([duration.get(v, 0) for v in event_values], dtype=float)
+  else:
+    durations = np.full(len(events), float(duration))
+
+  # Build the DataFrame with required BIDS columns
+  df = pd.DataFrame({
+    'onset':    np.round(onsets, 6),
+    'duration': durations,
+    'value':    event_values,
+  })
+
+  # Add trial_type column if event_id mapping is provided
+  if event_id is not None:
+    id_to_label = {v: k for k, v in event_id.items()}
+    df['trial_type'] = [id_to_label.get(v, 'n/a') for v in event_values]
+
+  if verbose:
+    print(df.to_string(index=False))
+
+  # Save to TSV if output_file is provided
+  if output_file is not None:
+    df.to_csv(output_file, sep='\t', index=False)
+    if verbose:
+      print(f"\nEvents saved to: {output_file}")
+
+  return df
+
+#===============================================================================
   
 #===============================================================================
