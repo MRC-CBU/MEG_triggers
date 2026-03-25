@@ -40,11 +40,13 @@ def decompose_sti101_in_individual_channels(raw_file=None, data=None, times=None
   if raw is None:
     if raw_file is not None:
       raw = mne.io.read_raw_fif(raw_file, preload=False, verbose="WARNING")
-      data, times = raw.get_data(picks="STI101", return_times=True)
+      if data is None or times is None:
+        data, times = raw.get_data(picks="STI101", return_times=True)
     elif data is None or times is None:
       raise ValueError("Either raw_file or both data and times must be provided.")
   else:
-    data, times = raw.get_data(picks="STI101", return_times=True)
+    if data is None or times is None:
+      data, times = raw.get_data(picks="STI101", return_times=True)
 
   # Extract unique STI values (ignoring 0)
   unique_values = np.unique(data[data != 0]).astype(int)
