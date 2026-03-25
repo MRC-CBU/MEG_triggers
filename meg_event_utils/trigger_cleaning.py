@@ -4,79 +4,104 @@ from collections import namedtuple
 from .trigger_misc import decode_sti_value_full_info
 
 #===============================================================================
-def decompose_sti101_in_individual_channels(raw_file=None, data=None, times=None, raw=None, verbose=True):
-  """
-  Decompose the STI101 channel into individual channels and create a time-series matrix.
+def decompose_sti101_in_individual_channels(
+    raw_file=None,
+    data=None,
+    times=None,
+    raw=None,
+    verbose=True,
+):
+    """
+    Decompose the STI101 channel into individual channels and create a time-series matrix.
 
-  Parameters:
-  -----------
-  raw_file : str, optional
-    Path to the raw MEG file in FIF format.
-  data : numpy.ndarray, optional
-    Preloaded data array containing the STI101 channel time series.
-  times : numpy.ndarray, optional
-    Preloaded array containing the time points corresponding to the data samples.
-  raw : mne.io.Raw, optional
-    Raw MEG data object.
-  verbose : bool, optional
-    If True, prints the unique values and individual channels. If False, suppresses printing. Default is True.
+    Parameters
+    ----------
+    raw_file : str, optional
+        Path to the raw MEG file in FIF format.
+    data : numpy.ndarray, optional
+        Preloaded STI101 data array, typically shape (1, n_samples).
+    times : numpy.ndarray, optional
+        Preloaded time array corresponding to `data`.
+    raw : mne.io.Raw, optional
+        Raw MEG object.
+    verbose : bool, optional
+        If True, print summary information.
 
-  Returns:
-  --------
-  time_series_array : numpy.ndarray
-    Array containing the time series for each individual channel.
-  channel_names : list of str
-    List of individual channel names.
-  raw : mne.io.Raw
-    Raw MEG object containing metadata like sampling frequency.
+    Returns
+    -------
+    time_series_array : numpy.ndarray
+        Binary array of shape (n_samples, n_channels).
+    channel_names : list of str
+        List of decoded channel names, e.g. ['STI001', 'STI002'].
+    raw : mne.io.Raw | None
+        Raw object if available, otherwise None.
+    """
 
-  Example:
-  --------
-  >>> time_series_array, channel_names = decompose_sti101_in_individual_channels('sample_raw.fif')
-  Unique values found: [1, 2, 3, 4, 5, 4096]
-  Individual channels: ['STI001', 'STI002', 'STI003', 'STI013', 'STI016']
-  """
-  # Load raw STI101 data
-  if raw is None:
-    if raw_file is not None:
-      raw = mne.io.read_raw_fif(raw_file, preload=False, verbose="WARNING")
-      if data is None or times is None:
-        data, times = raw.get_data(picks="STI101", return_times=True)
-    elif data is None or times is None:
-      raise ValueError("Either raw_file or both data and times must be provided.")
-  else:
+    # Load raw if needed for return value or for extracting data/times
+    if raw is None and raw_file is not None:
+        raw = mne.io.read_raw_fif(raw_file, preload=False, verbose="WARNING")
+
+    # If data/times were not provided, extract them from raw
     if data is None or times is None:
-      data, times = raw.get_data(picks="STI101", return_times=True)
+        if raw is None:
+            raise ValueError(
+                "You must provide either:\n"
+                "- raw, or\n"
+                "- raw_file, or\n"
+                "- both data and times."
+            )
+        data, times = raw.get_data(picks="STI101", return_times=True)
 
-  # Extract unique STI values (ignoring 0)
-  unique_values = np.unique(data[data != 0]).astype(int)
-  if unique_values.size == 0 and verbose:
-    print("No events detected in STI101.")
-    return np.empty((0, 0), dtype=int), [], raw
+    # Validate inputs
+    data = np.asarray(data)
+    times = np.asarray(times)
 
-  # Decode values into individual STI channels
-  decoded = {val: decode_sti_value_full_info(val) for val in unique_values}
-  individual_channels = sorted({ch for val, (channels, _) in decoded.items() for ch in channels})
-  
-  if verbose:
-    print(f"Unique values found: {unique_values.tolist()}; Individual channels: {individual_channels}")
+    if data.ndim == 1:
+        data = data[np.newaxis, :]
 
-  # Precompute channel indices for fast access
-  channel_indices = {ch: idx for idx, ch in enumerate(individual_channels)}
+    if data.ndim != 2 or data.shape[0] != 1:
+        raise ValueError(
+            f"`data` must have shape (1, n_samples) or (n_samples,), got {data.shape}."
+        )
 
-  # Initialize the time-series matrix
-  num_samples, num_channels = len(times), len(individual_channels)
-  time_series_array = np.zeros((num_samples, num_channels), dtype=int)
+    if data.shape[1] != len(times):
+        raise ValueError(
+            f"Mismatch between data samples ({data.shape[1]}) and times ({len(times)})."
+        )
 
-  # Fill in the matrix efficiently
-  for t in range(num_samples):
-    current_value = int(data[0, t])
-    if current_value != 0:
-      channels, bits = decode_sti_value_full_info(current_value)
-      for ch, bit in zip(channels, bits):
-        time_series_array[t, channel_indices[ch]] = bit
+    sti = data[0].astype(int)
 
-  return time_series_array, individual_channels, raw
+    # Extract unique nonzero STI values
+    unique_values = np.unique(sti[sti != 0])
+
+    if unique_values.size == 0:
+        if verbose:
+            print("No events detected in STI101.")
+        return np.empty((len(times), 0), dtype=int), [], raw
+
+    # Decode unique values
+    decoded = {val: decode_sti_value_full_info(val) for val in unique_values}
+    individual_channels = sorted(
+        {ch for channels, _ in decoded.values() for ch in channels}
+    )
+
+    if verbose:
+        print(
+            f"Unique values found: {unique_values.tolist()}; "
+            f"Individual channels: {individual_channels}"
+        )
+
+    channel_indices = {ch: idx for idx, ch in enumerate(individual_channels)}
+    time_series_array = np.zeros((len(times), len(individual_channels)), dtype=int)
+
+    # Fill output
+    for t, current_value in enumerate(sti):
+        if current_value != 0:
+            channels, bits = decode_sti_value_full_info(current_value)
+            for ch, bit in zip(channels, bits):
+                time_series_array[t, channel_indices[ch]] = bit
+
+    return time_series_array, individual_channels, raw
 
 #===============================================================================
 def clean_sti101_timeseries(data101, sti_channels, min_samples=2, max_button_samples=20000, verbose=True, steps=["remove_long_press", "remove_sti003", "remove_short_events", "remove_isolated_events"]):
