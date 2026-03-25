@@ -186,36 +186,60 @@ def get_sti101_values(raw_file=None, raw=None):
   return unique_values
 
 #===============================================================================
-def decode_sti_value_full_info(value):
-  """
-  Decode a signed 16-bit integer STI value to individual channel bits and labels.
+def decode_sti_value_full_info(value, decode_mode="full"):
+    """
+    Decode an STI value into active channel labels and bit values.
 
-  Parameters:
-  -----------
-  value : int
-    Signed 16-bit integer representing the STI value.
+    Parameters
+    ----------
+    value : int
+        Signed or unsigned 16-bit STI value.
+    decode_mode : {'full', 'low_byte', 'high_byte'}
+        How to decode the value:
+        - 'full': decode all 16 bits
+        - 'low_byte': decode only bits 0-7
+        - 'high_byte': shift right by 8 and decode as bits 0-7
 
-  Returns:
-  --------
-  channels : list of str
-    List of channel labels corresponding to the active bits in the STI value.
-  bits : list of int
-    List of power-of-2 values representing the active bits in the STI value.
+    Returns
+    -------
+    channels : list of str
+        Active STI channel labels.
+    bits : list of int
+        Active bit values in the decoded space.
 
-  Example:
-  --------
-  >>> decode_sti_value_full_info(32769)
-  (['STI001', 'STI016'], [1, 32768])
-  """
-  
-  if value < 0:
-      value = (1 << 16) + value  # Convert negative values to unsigned
+    Examples
+    --------
+    >>> decode_sti_value_full_info(32769, decode_mode="full")
+    (['STI001', 'STI016'], [1, 32768])
 
-  indices = [i for i in range(16) if value & (1 << i)]  # Get active bit indices
-  bits = [1 << i for i in indices]  # Convert indices to power-of-2 values
-  channels = [f"STI{str(i+1).zfill(3)}" for i in indices]  # Convert to STI labels
+    >>> decode_sti_value_full_info(5768, decode_mode="high_byte")
+    (['STI002', 'STI003', 'STI005'], [2, 4, 16])   # 22
+    """
+    value = int(value)
 
-  return channels, bits
+    if value < 0:
+        value = (1 << 16) + value  # convert signed 16-bit to unsigned
+
+    if decode_mode == "full":
+        decoded_value = value
+        n_bits = 16
+    elif decode_mode == "low_byte":
+        decoded_value = value & 0xFF
+        n_bits = 8
+    elif decode_mode == "high_byte":
+        decoded_value = (value >> 8) & 0xFF
+        n_bits = 8
+    else:
+        raise ValueError(
+            "decode_mode must be one of: 'full', 'low_byte', 'high_byte'"
+        )
+
+    indices = [i for i in range(n_bits) if decoded_value & (1 << i)]
+    bits = [1 << i for i in indices]
+    channels = [f"STI{str(i + 1).zfill(3)}" for i in indices]
+
+    return channels, bits
+
 
 #===============================================================================
 def decode_sti_value(value):

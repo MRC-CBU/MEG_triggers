@@ -4,13 +4,86 @@ from collections import namedtuple
 from .trigger_misc import decode_sti_value_full_info
 
 #===============================================================================
+def _infer_decode_mode(sti_values):
+    """
+    Infer how STI101 trigger values should be decoded.
+
+    Why this is needed
+    ------------------
+    Different MEG acquisition systems, acquisition settings, or trigger wiring
+    arrangements may store trigger information in different parts of the digital
+    trigger word. In some datasets, the trigger code is represented directly in
+    the lower bits of STI101. In others, the meaningful trigger code appears in
+    the upper byte instead, while the lower byte may contain constant or
+    irrelevant bits from other trigger lines.
+
+    For example, an event that conceptually corresponds to trigger ID 22 may
+    sometimes be stored as 22, but in another recording setup it may appear as
+    5768 (= 22 * 256 + 136). In that case, the useful trigger value is in the
+    upper byte and the lower byte reflects additional lines that are always or
+    often high.
+
+    This helper uses simple heuristics to decide whether STI101 values should be
+    interpreted:
+    - as a normal full 16-bit trigger word ('full'), or
+    - as trigger IDs effectively stored in the upper byte ('high_byte').
+
+    This makes trigger decomposition more robust across datasets acquired on
+    different MEG systems or with different stimulus/response-box wiring
+    conventions.
+
+    Parameters
+    ----------
+    sti_values : array-like
+        Nonzero values from the STI101 channel.
+
+    Returns
+    -------
+    decode_mode : str
+        Suggested decoding mode, currently either 'full' or 'high_byte'.
+
+    Notes
+    -----
+    This is a heuristic, not a guaranteed identification of the acquisition
+    setup. It is intended to provide a sensible default, but users can still
+    override the decoding mode manually if they already know how their trigger
+    channel is encoded.
+    """
+    sti_values = np.asarray(sti_values, dtype=int)
+    sti_values = sti_values[sti_values != 0]
+
+    if sti_values.size == 0:
+        return "full"
+
+    # Convert signed 16-bit negatives if present
+    sti_values = np.where(sti_values < 0, sti_values + (1 << 16), sti_values)
+
+    # Focus on values that actually have something in the upper byte
+    high_candidates = sti_values[sti_values > 255]
+
+    if high_candidates.size >= 3:
+        low_bytes = high_candidates & 0xFF
+        high_bytes = (high_candidates >> 8) & 0xFF
+
+        unique_low = np.unique(low_bytes)
+        unique_high = np.unique(high_bytes)
+
+        # If the low byte is constant or nearly constant, but the high byte varies,
+        # that strongly suggests that the real trigger IDs are in the upper byte.
+        if unique_low.size <= 2 and unique_high.size >= 3:
+            return "high_byte"
+
+    return "full"
+  
+#===============================================================================  
 def decompose_sti101_in_individual_channels(
     raw_file=None,
     data=None,
     times=None,
     raw=None,
     verbose=True,
-    return_raw=True
+    decode_mode="auto",
+    return_raw=True,
 ):
     """
     Decompose the STI101 channel into individual channels and create a time-series matrix.
@@ -18,42 +91,46 @@ def decompose_sti101_in_individual_channels(
     Parameters
     ----------
     raw_file : str, optional
-        Path to the raw MEG file in FIF format.
+        Path to raw FIF file.
     data : numpy.ndarray, optional
-        Preloaded STI101 data array, typically shape (1, n_samples).
+        Preloaded STI101 data, shape (1, n_samples) or (n_samples,).
     times : numpy.ndarray, optional
-        Preloaded time array corresponding to `data`.
+        Time points corresponding to data.
     raw : mne.io.Raw, optional
-        Raw MEG object.
+        Raw object.
     verbose : bool, optional
-        If True, print summary information.
+        Whether to print summary info.
+    decode_mode : {'auto', 'full', 'low_byte', 'high_byte'}
+        How to decode STI101 values.
+        - 'full': decode all 16 bits
+        - 'low_byte': decode only lower 8 bits
+        - 'high_byte': decode upper 8 bits as trigger IDs
+        - 'auto': infer from the data
+    return_raw : bool, optional
+        If True, include raw in the returned values.
 
     Returns
     -------
     time_series_array : numpy.ndarray
-        Binary array of shape (n_samples, n_channels).
+        Array of shape (n_samples, n_channels).
     channel_names : list of str
-        List of decoded channel names, e.g. ['STI001', 'STI002'].
+        List of decoded STI channel names.
     raw : mne.io.Raw | None
-        Raw object if available, otherwise None.
+        Returned only if return_raw=True.
     """
-
-    # Load raw if needed for return value or for extracting data/times
+    # Load raw if needed
     if raw is None and raw_file is not None:
         raw = mne.io.read_raw_fif(raw_file, preload=False, verbose="WARNING")
 
-    # If data/times were not provided, extract them from raw
+    # Get data/times if not provided
     if data is None or times is None:
         if raw is None:
             raise ValueError(
-                "You must provide either:\n"
-                "- raw, or\n"
-                "- raw_file, or\n"
-                "- both data and times."
+                "You must provide either raw, raw_file, or both data and times."
             )
         data, times = raw.get_data(picks="STI101", return_times=True)
 
-    # Validate inputs
+    # Validate input shapes
     data = np.asarray(data)
     times = np.asarray(times)
 
@@ -67,21 +144,35 @@ def decompose_sti101_in_individual_channels(
 
     if data.shape[1] != len(times):
         raise ValueError(
-            f"Mismatch between data samples ({data.shape[1]}) and times ({len(times)})."
+            f"Mismatch between number of samples in data ({data.shape[1]}) "
+            f"and length of times ({len(times)})."
         )
 
     sti = data[0].astype(int)
+    nonzero_values = sti[sti != 0]
 
-    # Extract unique nonzero STI values
-    unique_values = np.unique(sti[sti != 0])
-
-    if unique_values.size == 0:
+    if nonzero_values.size == 0:
         if verbose:
             print("No events detected in STI101.")
-        return np.empty((len(times), 0), dtype=int), [], raw
+        result = (np.empty((len(times), 0), dtype=int), [])
+        return (*result, raw) if return_raw else result
+
+    # Determine decode mode
+    if decode_mode == "auto":
+        actual_decode_mode = _infer_decode_mode(nonzero_values)
+    else:
+        actual_decode_mode = decode_mode
+
+    if verbose and decode_mode == "auto":
+        print(f"Auto-detected decode mode: {actual_decode_mode}")
 
     # Decode unique values
-    decoded = {val: decode_sti_value_full_info(val) for val in unique_values}
+    unique_values = np.unique(nonzero_values)
+    decoded = {
+        val: decode_sti_value_full_info(val, decode_mode=actual_decode_mode)
+        for val in unique_values
+    }
+
     individual_channels = sorted(
         {ch for channels, _ in decoded.values() for ch in channels}
     )
@@ -95,16 +186,18 @@ def decompose_sti101_in_individual_channels(
     channel_indices = {ch: idx for idx, ch in enumerate(individual_channels)}
     time_series_array = np.zeros((len(times), len(individual_channels)), dtype=int)
 
-    # Fill output
+    # Fill matrix
     for t, current_value in enumerate(sti):
         if current_value != 0:
-            channels, bits = decode_sti_value_full_info(current_value)
+            channels, bits = decode_sti_value_full_info(
+                current_value,
+                decode_mode=actual_decode_mode,
+            )
             for ch, bit in zip(channels, bits):
                 time_series_array[t, channel_indices[ch]] = bit
 
-    if return_raw:
-        return time_series_array, individual_channels, raw
-    return time_series_array, individual_channels
+    result = (time_series_array, individual_channels)
+    return (*result, raw) if return_raw else result
 
 #===============================================================================
 def clean_sti101_timeseries(data101, sti_channels, min_samples=2, max_button_samples=20000, verbose=True, steps=["remove_long_press", "remove_sti003", "remove_short_events", "remove_isolated_events"]):
