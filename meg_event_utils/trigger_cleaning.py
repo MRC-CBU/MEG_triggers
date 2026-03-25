@@ -10,6 +10,7 @@ def decompose_sti101_in_individual_channels(
     times=None,
     raw=None,
     verbose=True,
+    return_raw=True
 ):
     """
     Decompose the STI101 channel into individual channels and create a time-series matrix.
@@ -101,7 +102,9 @@ def decompose_sti101_in_individual_channels(
             for ch, bit in zip(channels, bits):
                 time_series_array[t, channel_indices[ch]] = bit
 
-    return time_series_array, individual_channels, raw
+    if return_raw:
+        return time_series_array, individual_channels, raw
+    return time_series_array, individual_channels
 
 #===============================================================================
 def clean_sti101_timeseries(data101, sti_channels, min_samples=2, max_button_samples=20000, verbose=True, steps=["remove_long_press", "remove_sti003", "remove_short_events", "remove_isolated_events"]):
