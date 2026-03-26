@@ -520,7 +520,7 @@ def translate_channels_to_events(time_series_array, channel_names):
     return event_time_series, event_names
 
 #===============================================================================
-def find_corrected_events(raw_file=None, raw=None, cleaning_steps=["remove_long_press", "remove_sti003", "remove_short_events", "remove_isolated_events"], min_duration=0, shortest_event=1, consecutive=True, verbose=True):
+def find_corrected_events(raw_file=None, raw=None, cleaning_steps=["remove_long_press", "remove_sti003", "remove_short_events", "remove_isolated_events"], min_duration=0, shortest_event=1, consecutive=True, decode_mode='auto', verbose=True):
   """
   Find corrected events from raw MEG data file.
 
@@ -564,7 +564,7 @@ def find_corrected_events(raw_file=None, raw=None, cleaning_steps=["remove_long_
 
   
   # Decompose STI101 into individual channels
-  time_series_array, individual_channels, raw = decompose_sti101_in_individual_channels(raw_file=raw_file, raw=raw, verbose=verbose)
+  time_series_array, individual_channels, raw = decompose_sti101_in_individual_channels(raw_file=raw_file, raw=raw, decode_mode=decode_mode,verbose=verbose)
 
   # Clean STI101 time series data
   cleaned_time_series, removed_events = clean_sti101_timeseries(time_series_array, individual_channels, steps=cleaning_steps, verbose=verbose)
