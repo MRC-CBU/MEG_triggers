@@ -2,3 +2,4 @@
 .virtual_documents
 __pycache__
 scratch/
+copy_to_share.sh
