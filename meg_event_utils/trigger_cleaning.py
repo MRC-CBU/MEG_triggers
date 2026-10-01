@@ -4,85 +4,13 @@ from collections import namedtuple
 from .trigger_misc import decode_sti_value_full_info
 
 #===============================================================================
-def _infer_decode_mode(sti_values):
-    """
-    Infer how STI101 trigger values should be decoded.
-
-    Why this is needed
-    ------------------
-    Different MEG acquisition systems, acquisition settings, or trigger wiring
-    arrangements may store trigger information in different parts of the digital
-    trigger word. In some datasets, the trigger code is represented directly in
-    the lower bits of STI101. In others, the meaningful trigger code appears in
-    the upper byte instead, while the lower byte may contain constant or
-    irrelevant bits from other trigger lines.
-
-    For example, an event that conceptually corresponds to trigger ID 22 may
-    sometimes be stored as 22, but in another recording setup it may appear as
-    5768 (= 22 * 256 + 136). In that case, the useful trigger value is in the
-    upper byte and the lower byte reflects additional lines that are always or
-    often high.
-
-    This helper uses simple heuristics to decide whether STI101 values should be
-    interpreted:
-    - as a normal full 16-bit trigger word ('full'), or
-    - as trigger IDs effectively stored in the upper byte ('high_byte').
-
-    This makes trigger decomposition more robust across datasets acquired on
-    different MEG systems or with different stimulus/response-box wiring
-    conventions.
-
-    Parameters
-    ----------
-    sti_values : array-like
-        Nonzero values from the STI101 channel.
-
-    Returns
-    -------
-    decode_mode : str
-        Suggested decoding mode, currently either 'full' or 'high_byte'.
-
-    Notes
-    -----
-    This is a heuristic, not a guaranteed identification of the acquisition
-    setup. It is intended to provide a sensible default, but users can still
-    override the decoding mode manually if they already know how their trigger
-    channel is encoded.
-    """
-    sti_values = np.asarray(sti_values, dtype=int)
-    sti_values = sti_values[sti_values != 0]
-
-    if sti_values.size == 0:
-        return "full"
-
-    # Convert signed 16-bit negatives if present
-    sti_values = np.where(sti_values < 0, sti_values + (1 << 16), sti_values)
-
-    # Focus on values that actually have something in the upper byte
-    high_candidates = sti_values[sti_values > 255]
-
-    if high_candidates.size >= 3:
-        low_bytes = high_candidates & 0xFF
-        high_bytes = (high_candidates >> 8) & 0xFF
-
-        unique_low = np.unique(low_bytes)
-        unique_high = np.unique(high_bytes)
-
-        # If the low byte is constant or nearly constant, but the high byte varies,
-        # that strongly suggests that the real trigger IDs are in the upper byte.
-        if unique_low.size <= 2 and unique_high.size >= 3:
-            return "high_byte"
-
-    return "full"
-  
-#===============================================================================  
 def decompose_sti101_in_individual_channels(
     raw_file=None,
     data=None,
     times=None,
     raw=None,
     verbose=True,
-    decode_mode="auto",
+    decode_mode="full",
     return_raw=True,
 ):
     """
@@ -100,12 +28,11 @@ def decompose_sti101_in_individual_channels(
         Raw object.
     verbose : bool, optional
         Whether to print summary info.
-    decode_mode : {'auto', 'full', 'low_byte', 'high_byte'}
+    decode_mode : {'full', 'low_byte', 'high_byte'}
         How to decode STI101 values.
         - 'full': decode all 16 bits
         - 'low_byte': decode only lower 8 bits
         - 'high_byte': decode upper 8 bits as trigger IDs
-        - 'auto': infer from the data
     return_raw : bool, optional
         If True, include raw in the returned values.
 
@@ -157,19 +84,10 @@ def decompose_sti101_in_individual_channels(
         result = (np.empty((len(times), 0), dtype=int), [])
         return (*result, raw) if return_raw else result
 
-    # Determine decode mode
-    if decode_mode == "auto":
-        actual_decode_mode = _infer_decode_mode(nonzero_values)
-    else:
-        actual_decode_mode = decode_mode
-
-    if verbose and decode_mode == "auto":
-        print(f"Auto-detected decode mode: {actual_decode_mode}")
-
     # Decode unique values
     unique_values = np.unique(nonzero_values)
     decoded = {
-        val: decode_sti_value_full_info(val, decode_mode=actual_decode_mode)
+        val: decode_sti_value_full_info(val, decode_mode=decode_mode)
         for val in unique_values
     }
 
@@ -191,7 +109,7 @@ def decompose_sti101_in_individual_channels(
         if current_value != 0:
             channels, bits = decode_sti_value_full_info(
                 current_value,
-                decode_mode=actual_decode_mode,
+                decode_mode=decode_mode,
             )
             for ch, bit in zip(channels, bits):
                 time_series_array[t, channel_indices[ch]] = bit
@@ -359,7 +277,7 @@ def clean_sti101_timeseries(data101, sti_channels, min_samples=2, max_button_sam
     return filtered_time_series, removed_events
 
 #===============================================================================
-def sum_stim_channels_and_find_events(cleaned_time_series, individual_channels, raw, stim_range=(1, 9), min_duration=0.002, shortest_event=1, consecutive=True, verbose=True):
+def sum_stim_channels_and_find_events(cleaned_time_series, individual_channels, raw, stim_range=(1, 9), valid_stim_codes=None, min_duration=0.002, shortest_event=1, consecutive=True, verbose=True):
   """
   Sum stimulus channels and detect events from cleaned time series data.
 
@@ -376,6 +294,11 @@ def sum_stim_channels_and_find_events(cleaned_time_series, individual_channels, 
     Raw MEG object containing metadata like sampling frequency.
   stim_range : tuple, optional
     Range of STI channel numbers to consider as stimulus channels (default: (1, 9)).
+  valid_stim_codes : None, tuple, or iterable, optional
+    Restrict allowed stimulus codes after summation.
+    - None: keep all non-zero values
+    - (1, 64): keep only values between 1 and 64 inclusive
+    - [16, 32, 64]: keep only these exact codes
   min_duration : float, optional
     Minimum duration (in seconds) for an event to be considered valid (default: 0.002).
   shortest_event : int, optional
@@ -404,6 +327,22 @@ def sum_stim_channels_and_find_events(cleaned_time_series, individual_channels, 
 
   # Sum the values across stim channels
   stimulus_codes = np.sum(cleaned_time_series[:, stimulus_indices], axis=1, keepdims=True)  # Faster reshape
+  
+  if valid_stim_codes is not None:
+        stimulus_codes = stimulus_codes.copy()
+
+        if (
+            isinstance(valid_stim_codes, tuple)
+            and len(valid_stim_codes) == 2
+            and all(np.isscalar(x) for x in valid_stim_codes)
+        ):
+            lo, hi = valid_stim_codes
+            invalid_idx = (stimulus_codes < lo) | (stimulus_codes > hi)
+            stimulus_codes[invalid_idx] = 0
+        else:
+            valid_set = np.array(list(valid_stim_codes))
+            invalid_idx = ~np.isin(stimulus_codes, valid_set) & (stimulus_codes != 0)
+            stimulus_codes[invalid_idx] = 0
 
   # Get indices and names of non-stimulus channels
   button_indices = np.setdiff1d(np.arange(len(individual_channels)), stimulus_indices)  # Set operation is faster

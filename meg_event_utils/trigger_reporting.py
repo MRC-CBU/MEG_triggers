@@ -46,7 +46,7 @@ def capture_print_output(func, *args, **kwargs):
 # -----------------------------------------------------------------------------------------------
 # Function to generate an HTML report
 # -----------------------------------------------------------------------------------------------
-def generate_html_report(subjects_data, phase, task, output_html="report.html", title="MEG Event Triggers"):
+def generate_html_report(subjects_data, phase=None, task=None, output_html="report.html", title="MEG Event Triggers"):
     html_content = f"""
     <html>
     <head>
